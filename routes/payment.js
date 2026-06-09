@@ -83,7 +83,7 @@ router.post("/create-order", verifyToken, async (req, res) => {
           const additionalEvents = Math.max(
             0,
             registrationData.selectedEvents.length -
-              passLimitsInfo.techEventsIncluded
+            passLimitsInfo.techEventsIncluded
           );
           if (additionalEvents > 0) {
             // Each additional tech event: ₹99 regular, ₹59 CIT
@@ -96,7 +96,7 @@ router.post("/create-order", verifyToken, async (req, res) => {
           const additionalWorkshops = Math.max(
             0,
             registrationData.selectedWorkshops.length -
-              passLimitsInfo.workshopsIncluded
+            passLimitsInfo.workshopsIncluded
           );
           if (additionalWorkshops > 0) {
             // Each additional workshop: ₹100 for both regular and CIT
@@ -686,8 +686,8 @@ router.post("/test-email", verifyToken, async (req, res) => {
           orderId: "test_order_123",
         },
         selectedEvents: [
-          { id: 1, title: "Try, If you can..?" },
-          { id: 2, title: "Reverse Code" },
+          { id: 1, title: "Paper Presentation" },
+          { id: 2, title: "Jeopardy-Style CTF" },
         ],
         selectedWorkshops: [{ id: 1, title: "Blend with Blender" }],
         selectedNonTechEvents: [
@@ -889,7 +889,7 @@ router.post("/send-od-letter", verifyToken, async (req, res) => {
   try {
     const multer = require('multer');
     const upload = multer({ storage: multer.memoryStorage() });
-    
+
     // Handle the multipart form data
     upload.single('attachment')(req, res, async (err) => {
       if (err) {
