@@ -71,48 +71,63 @@ const events = [
   // Non-Technical Events
   {
     id: 7,
-    title: "BGMI",
+    title: "Chess",
     type: "non-tech",
     description:
-      "Battle it out in the popular mobile game BGMI! Team up, strategize, and compete for victory in an action-packed gaming tournament.",
-    tags: ["Gaming", "Teamwork", "Strategy", "Competition"],
+      "A classic chess tournament conducted in two stages. Play an Online Qualifier (Round 1) on mobile devices to secure a spot in the intense face-to-face Offline Finals (Round 2) played on a physical board under supervision.",
+    tags: ["Strategy", "Board Game", "Tactics", "Individual", "Competition"],
     price: "₹79",
+    maxTeamSize: 1,
   },
   {
     id: 8,
-    title: "ADDZAP",
+    title: "Best Meme Creation",
     type: "non-tech",
     description:
-      "Unleash your creativity in ADDZAP! Create and present unique advertisements for fun products, showcasing your storytelling and public speaking skills.",
-    tags: ["Storytelling", "Creativity", "Public Speaking"],
+      "Unleash your humor and digital creativity in this solo event. Capture the spirit, highlights, and funniest moments of Tech Festia's live events in an original meme and submit it within the time limit.",
+    tags: ["Meme", "Creativity", "Humor", "Design", "Solo"],
     price: "₹79",
+    maxTeamSize: 1,
   },
   {
     id: 9,
-    title: "JAM",
+    title: "Missing Lyrics",
     type: "non-tech",
     description:
-      "Showcase your spontaneity in Just A Minute (JAM)! Speak on a given topic for one minute without hesitation, repetition, or deviation.",
-    tags: ["Public Speaking", "Spontaneity", "Communication", "Fun"],
+      "Identify and complete missing lyrics from popular tracks in this team musical challenge. Test your speed in Round 1 (Basic Lyrics) and identify songs, movies, or tracks solely from background music (BGM) in the buzzer-based Round 2.",
+    tags: ["Music", "Buzzer", "Teamwork", "BGM", "Fun"],
     price: "₹79",
+    maxTeamSize: 4,
   },
-  // {
-  //   id: 10,
-  //   title: "CHESS",
-  //   type: "non-tech",
-  //   description:
-  //     "Test your strategic thinking and patience in a classic chess tournament. Compete against fellow participants and prove your mastery of the game.",
-  //   tags: ["Strategy", "Board Game", "Competition", "Logic"],
-  //   price: "₹79",
-  // },
+  {
+    id: 10,
+    title: "Murder Mystery",
+    type: "non-tech",
+    description:
+      "Put on your detective hat for this interactive team investigation. Solve hidden clues and hunt down evidence in Round 1 (Clue Hunt), then present your final investigation findings to unmask the culprit behind a fictional crime scene.",
+    tags: ["Investigation", "Puzzles", "Adventure", "Teamwork", "Mystery"],
+    price: "₹79",
+    maxTeamSize: 4,
+  },
   {
     id: 11,
-    title: "Best Photography",
+    title: "Wiki Surfers",
     type: "non-tech",
     description:
-      "Capture the essence of the event! Submit your best photographs and compete for the title of Best Photographer, judged on creativity and technique.",
-    tags: ["Photography", "Creativity", "Contest", "Art"],
+      "A fast-paced internet navigation race where teams must navigate from a random starting Wikipedia page to a designated target page using only internal Wikipedia hyperlinks, aiming to finish in the fewest clicks and shortest time.",
+    tags: ["Web Navigation", "Wikipedia", "Strategy", "Speed", "Research"],
     price: "₹79",
+    maxTeamSize: 2,
+  },
+  {
+    id: 12,
+    title: "ADZAP",
+    type: "non-tech",
+    description:
+      "A wacky marketing and sales contest where teams are given a bizarre, non-existent product 10 minutes before the event. Persuade and convince the judges with a highly entertaining 3-5 minute advertisement performance using props and background music.",
+    tags: ["Marketing", "Creativity", "Drama", "Public Speaking", "Teamwork"],
+    price: "₹79",
+    maxTeamSize: 4,
   },
 ];
 
