@@ -269,59 +269,8 @@ router.post("/submit", verifyToken, async (req, res) => {
         `Free registration completed: ${registrationId} for user ${userEmail}`
       );
 
-      // Send confirmation email for free registration
-      try {
-        const emailData = {
-          registrationId,
-          userEmail: req.user.email,
-          userName: formData.name,
-          userDetails: {
-            name: formData.name,
-            email: formData.email,
-            whatsapp: formData.whatsapp,
-            college: formData.college,
-            department: formData.department,
-            year: formData.year,
-          },
-          teamDetails: formData.isTeamEvent
-            ? {
-                isTeamEvent: formData.isTeamEvent,
-                teamSize: formData.teamSize,
-                teamMembers: formData.teamMembers || [],
-              }
-            : null,
-          paymentDetails: { amount: 0 }, // Free registration
-          selectedPass: formData.selectedPass,
-          selectedEvents: formData.selectedEvents || [],
-          selectedWorkshops: formData.selectedWorkshops || [],
-          selectedNonTechEvents: formData.selectedNonTechEvents || [],
-        };
-
-        console.log(
-          `📧 Sending confirmation email for free registration: ${registrationId}`
-        );
-        const emailResult = await sendRegistrationConfirmationEmail(
-          emailData,
-          events,
-          workshops
-        );
-
-        if (emailResult.success) {
-          console.log(
-            `✅ Free registration email sent successfully to ${req.user.email}`
-          );
-        } else {
-          console.error(
-            `❌ Failed to send free registration email:`,
-            emailResult.error
-          );
-        }
-      } catch (emailError) {
-        console.error(`❌ Error sending free registration email:`, emailError);
-        // Don't fail the registration if email fails
-      }
-
-      return res.json({
+      // ✅ Respond immediately — do NOT wait for email
+      res.json({
         success: true,
         data: {
           registrationId,
@@ -329,6 +278,59 @@ router.post("/submit", verifyToken, async (req, res) => {
           eventCount: registrationData.eventCount,
         },
         message: "Registration completed successfully",
+      });
+
+      // 📧 Send confirmation email in background (fire-and-forget)
+      setImmediate(async () => {
+        try {
+          const emailData = {
+            registrationId,
+            userEmail: req.user.email,
+            userName: formData.name,
+            userDetails: {
+              name: formData.name,
+              email: formData.email,
+              whatsapp: formData.whatsapp,
+              college: formData.college,
+              department: formData.department,
+              year: formData.year,
+            },
+            teamDetails: formData.isTeamEvent
+              ? {
+                  isTeamEvent: formData.isTeamEvent,
+                  teamSize: formData.teamSize,
+                  teamMembers: formData.teamMembers || [],
+                }
+              : null,
+            paymentDetails: { amount: 0 }, // Free registration
+            selectedPass: formData.selectedPass,
+            selectedEvents: formData.selectedEvents || [],
+            selectedWorkshops: formData.selectedWorkshops || [],
+            selectedNonTechEvents: formData.selectedNonTechEvents || [],
+          };
+
+          console.log(
+            `📧 Sending confirmation email for free registration: ${registrationId}`
+          );
+          const emailResult = await sendRegistrationConfirmationEmail(
+            emailData,
+            events,
+            workshops
+          );
+
+          if (emailResult.success) {
+            console.log(
+              `✅ Free registration email sent successfully to ${formData.email}`
+            );
+          } else {
+            console.error(
+              `❌ Failed to send free registration email:`,
+              emailResult.error
+            );
+          }
+        } catch (emailError) {
+          console.error(`❌ Error sending free registration email (background):`, emailError);
+        }
       });
     } else {
       // For paid registrations - redirect to payment processing

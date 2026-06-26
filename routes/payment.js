@@ -479,29 +479,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
 
     console.log("Payment verified and registration completed:", registrationId);
 
-    // Send confirmation email
-    try {
-      const emailResult = await sendRegistrationConfirmationEmail(
-        finalRegistrationData,
-        events,
-        workshops
-      );
-
-      if (emailResult.success) {
-        console.log(
-          `Confirmation email sent successfully to ${req.user.email} using ${emailResult.usedEmail}`
-        );
-      } else {
-        console.error(
-          `Failed to send confirmation email: ${emailResult.error}`
-        );
-        // Don't fail the registration if email fails
-      }
-    } catch (emailError) {
-      console.error("Error sending confirmation email:", emailError);
-      // Continue with successful response even if email fails
-    }
-
+    // ✅ Respond immediately — do NOT wait for email to send
     res.json({
       success: true,
       data: {
@@ -512,6 +490,31 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
       },
       message: "Payment verified and registration completed successfully",
     });
+
+    // 📧 Send confirmation email in background (fire-and-forget)
+    // This runs AFTER the response is already sent — no blocking
+    setImmediate(async () => {
+      try {
+        const emailResult = await sendRegistrationConfirmationEmail(
+          finalRegistrationData,
+          events,
+          workshops
+        );
+
+        if (emailResult.success) {
+          console.log(
+            `Confirmation email sent successfully to ${finalRegistrationData.email} using ${emailResult.usedEmail}`
+          );
+        } else {
+          console.error(
+            `Failed to send confirmation email: ${emailResult.error}`
+          );
+        }
+      } catch (emailError) {
+        console.error("Error sending confirmation email (background):", emailError);
+      }
+    });
+
   } catch (error) {
     console.error("Error verifying payment:", error);
     res.status(500).json({
@@ -521,6 +524,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
     });
   }
 });
+
 
 // Get payment status endpoint - simplified for UPI payments
 router.get("/status/:orderId", verifyToken, async (req, res) => {
