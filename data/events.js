@@ -9,7 +9,7 @@ const events = [
       "Develop feasible solutions to given problems. Present innovative and practical approaches that effectively address requirements and demonstrate technical excellence.",
     tags: ["Presentation", "Innovation", "Research", "Problem Solving"],
     price: "₹99",
-    citPrice: "₹59",
+    citPrice: "₹1",
     maxTeamSize: 2,
   },
   {
