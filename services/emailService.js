@@ -55,6 +55,18 @@ setInterval(resetUsageCounters, 24 * 60 * 60 * 1000);
 
 // Get email service status
 const getEmailServiceStatus = () => {
+  if (process.env.RESEND_API_KEY) {
+    return [
+      {
+        type: "Resend",
+        email: "onboarding@resend.dev",
+        isConfigured: true,
+        currentUsage: "N/A",
+        dailyLimit: "Unlimited (free tier limits apply)",
+        isActive: true,
+      }
+    ];
+  }
   return emailConfigs.map((config, index) => ({
     index: index + 1,
     email: config.email
@@ -106,9 +118,29 @@ const getAvailableEmailConfig = () => {
 
 // Create transporter for the selected email
 const createTransporter = (config) => {
+  if (process.env.RESEND_API_KEY) {
+    console.log("🔧 Creating transporter using Resend SMTP");
+    try {
+      const transporter = nodemailer.createTransport({
+        host: "smtp.resend.com",
+        port: 465,
+        secure: true,
+        auth: {
+          user: "resend",
+          pass: process.env.RESEND_API_KEY,
+        },
+      });
+      console.log(`✅ Resend transporter created successfully`);
+      return transporter;
+    } catch (error) {
+      console.error(`❌ Error creating Resend transporter:`, error.message);
+      throw error;
+    }
+  }
+
   console.log(
-    `🔧 Creating transporter for: ${
-      config.email
+    `🔧 Creating transporter for Gmail: ${
+      config && config.email
         ? config.email.replace(/(.{3}).*(@.*)/, "$1***$2")
         : "Not configured"
     }`
@@ -123,10 +155,10 @@ const createTransporter = (config) => {
       },
     });
 
-    console.log(`✅ Transporter created successfully`);
+    console.log(`✅ Gmail transporter created successfully`);
     return transporter;
   } catch (error) {
-    console.error(`❌ Error creating transporter:`, error.message);
+    console.error(`❌ Error creating Gmail transporter:`, error.message);
     throw error;
   }
 };
@@ -504,21 +536,26 @@ const sendRegistrationConfirmationEmail = async (
   );
 
   try {
-    const emailConfig = getAvailableEmailConfig();
+    const isResend = !!process.env.RESEND_API_KEY;
+    let emailConfig = null;
+    let transporter = null;
 
-    if (!emailConfig.email || !emailConfig.password) {
-      console.error("❌ No email configuration available");
-      return { success: false, error: "Email service not configured" };
+    if (isResend) {
+      transporter = createTransporter();
+    } else {
+      emailConfig = getAvailableEmailConfig();
+      if (!emailConfig.email || !emailConfig.password) {
+        console.error("❌ No email configuration available");
+        return { success: false, error: "Email service not configured" };
+      }
+      console.log(
+        `🔧 Using Gmail config for sending: ${emailConfig.email.replace(
+          /(.{3}).*(@.*)/,
+          "$1***$2"
+        )}`
+      );
+      transporter = createTransporter(emailConfig);
     }
-
-    console.log(
-      `🔧 Using email config for sending: ${emailConfig.email.replace(
-        /(.{3}).*(@.*)/,
-        "$1***$2"
-      )}`
-    );
-
-    const transporter = createTransporter(emailConfig);
 
     console.log(`📝 Generating email template...`);
     logEmailTemplateInfo(registrationData, events, workshops);
@@ -531,8 +568,12 @@ const sendRegistrationConfirmationEmail = async (
       `✅ Email template generated successfully (${htmlContent.length} characters)`
     );
 
+    const fromAddress = isResend
+      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
+      : `"${emailConfig.name}" <${emailConfig.email}>`;
+
     const mailOptions = {
-      from: `"${emailConfig.name}" <${emailConfig.email}>`,
+      from: fromAddress,
       to: registrationData.userEmail,
       subject: `🎉 Tech Fiesta 2025 - Registration Confirmed (${registrationData.registrationId})`,
       html: htmlContent,
@@ -564,27 +605,27 @@ For queries, contact: Asymmetric@citchennai.net
 
     const info = await transporter.sendMail(mailOptions);
 
-    // Increment usage counter
-    emailConfig.currentUsage++;
-
-    // Move to next email for the next send
-    currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
+    if (!isResend) {
+      // Increment usage counter
+      emailConfig.currentUsage++;
+      // Move to next email for the next send
+      currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
+      console.log(`📊 Email usage stats:`, {
+        usedEmail: emailConfig.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
+        currentUsage: emailConfig.currentUsage,
+        dailyLimit: emailConfig.dailyLimit,
+        nextEmailIndex: currentEmailIndex,
+      });
+    }
 
     console.log(`✅ Registration email sent successfully!`);
     console.log(`📧 Sent to: ${registrationData.userEmail}`);
     console.log(`🆔 Message ID: ${info.messageId}`);
-    console.log(`📊 Email usage stats:`, {
-      usedEmail: emailConfig.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
-      currentUsage: emailConfig.currentUsage,
-      dailyLimit: emailConfig.dailyLimit,
-      nextEmailIndex: currentEmailIndex,
-    });
 
     return {
       success: true,
       messageId: info.messageId,
-      usedEmail: emailConfig.email,
-      currentUsage: emailConfig.currentUsage,
+      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
     };
   } catch (error) {
     console.error("❌ Error sending registration email:", error);
@@ -627,24 +668,33 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
   console.log(`📝 Subject: ${subject}`);
 
   try {
-    const emailConfig = getAvailableEmailConfig();
+    const isResend = !!process.env.RESEND_API_KEY;
+    let emailConfig = null;
+    let transporter = null;
 
-    if (!emailConfig.email || !emailConfig.password) {
-      console.error("❌ No email configuration available");
-      return { success: false, error: "Email service not configured" };
+    if (isResend) {
+      transporter = createTransporter();
+    } else {
+      emailConfig = getAvailableEmailConfig();
+      if (!emailConfig.email || !emailConfig.password) {
+        console.error("❌ No email configuration available");
+        return { success: false, error: "Email service not configured" };
+      }
+      console.log(
+        `🔧 Using Gmail config for notification: ${emailConfig.email.replace(
+          /(.{3}).*(@.*)/,
+          "$1***$2"
+        )}`
+      );
+      transporter = createTransporter(emailConfig);
     }
 
-    console.log(
-      `🔧 Using email config: ${emailConfig.email.replace(
-        /(.{3}).*(@.*)/,
-        "$1***$2"
-      )}`
-    );
-
-    const transporter = createTransporter(emailConfig);
+    const fromAddress = isResend
+      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
+      : `"${emailConfig.name}" <${emailConfig.email}>`;
 
     const mailOptions = {
-      from: `"${emailConfig.name}" <${emailConfig.email}>`,
+      from: fromAddress,
       to: to,
       subject: subject,
       html: htmlContent,
@@ -661,8 +711,11 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
     });
 
     const info = await transporter.sendMail(mailOptions);
-    emailConfig.currentUsage++;
-    currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
+
+    if (!isResend) {
+      emailConfig.currentUsage++;
+      currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
+    }
 
     console.log(`✅ Notification email sent successfully!`);
     console.log(`📧 Sent to: ${to}`);
@@ -671,7 +724,7 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
     return {
       success: true,
       messageId: info.messageId,
-      usedEmail: emailConfig.email,
+      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
     };
   } catch (error) {
     console.error("❌ Error sending notification email:", error);
@@ -685,11 +738,40 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
 
 // Test email connectivity
 const testEmailConnectivity = async () => {
-  console.log(`🧪 Testing email connectivity for all configurations...`);
+  console.log(`🧪 Testing email connectivity...`);
   const results = [];
 
+  if (process.env.RESEND_API_KEY) {
+    console.log(`🔍 Testing Resend SMTP configuration`);
+    try {
+      const transporter = createTransporter();
+      await transporter.verify();
+      console.log(`✅ Resend SMTP: Connection successful`);
+      results.push({
+        type: "resend",
+        status: "success",
+        message: "Connection verified with Resend SMTP",
+      });
+    } catch (error) {
+      console.error(`❌ Resend SMTP: Connection failed -`, error.message);
+      results.push({
+        type: "resend",
+        status: "failed",
+        error: error.message,
+        code: error.code,
+      });
+    }
+    console.log(`🏁 Email connectivity test completed`);
+    console.table(results);
+    return results;
+  }
+
+  console.log(`🧪 Testing email connectivity for all Gmail configurations...`);
   for (let i = 0; i < emailConfigs.length; i++) {
     const config = emailConfigs[i];
+    if (!config.email || !config.password) {
+      continue;
+    }
     console.log(
       `🔍 Testing email ${i + 1}: ${config.email.replace(
         /(.{3}).*(@.*)/,
@@ -808,88 +890,83 @@ const sendODLetterWithAttachment = async (to, subject, htmlContent, textContent,
   console.log(`📧 Recipient: ${to}`);
   console.log(`📎 Attachment: ${attachment.filename}`);
 
-  let tried = 0;
-  let lastError = null;
-  let startIndex = currentEmailIndex;
-  do {
-    try {
-      const emailConfig = getAvailableEmailConfig();
+  try {
+    const isResend = !!process.env.RESEND_API_KEY;
+    let emailConfig = null;
+    let transporter = null;
 
+    if (isResend) {
+      transporter = createTransporter();
+    } else {
+      emailConfig = getAvailableEmailConfig();
       if (!emailConfig.email || !emailConfig.password) {
         console.error("❌ No email configuration available");
         return { success: false, error: "Email service not configured" };
       }
-
       console.log(
-        `🔧 Using email config: ${emailConfig.email.replace(
+        `🔧 Using Gmail config for OD: ${emailConfig.email.replace(
           /(.{3}).*(@.*)/,
           "$1***$2"
         )}`
       );
+      transporter = createTransporter(emailConfig);
+    }
 
-      const transporter = createTransporter(emailConfig);
+    const fromAddress = isResend
+      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
+      : `"${emailConfig.name}" <${emailConfig.email}>`;
 
-      const mailOptions = {
-        from: `"${emailConfig.name}" <${emailConfig.email}>`,
-        to: to,
-        subject: subject,
-        html: htmlContent,
-        text: textContent,
-        attachments: [
-          {
-            filename: attachment.filename,
-            content: attachment.content,
-            contentType: attachment.contentType,
-          },
-        ],
-      };
+    const mailOptions = {
+      from: fromAddress,
+      to: to,
+      subject: subject,
+      html: htmlContent,
+      text: textContent,
+      attachments: [
+        {
+          filename: attachment.filename,
+          content: attachment.content,
+          contentType: attachment.contentType,
+        },
+      ],
+    };
 
-      console.log(`📤 Sending OD letter email with PDF attachment...`);
-      console.log(`Mail options:`, {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        subject: mailOptions.subject,
-        hasHtml: !!mailOptions.html,
-        hasText: !!mailOptions.text,
-        hasAttachment: !!mailOptions.attachments,
-        attachmentSize: attachment.content.length,
-      });
+    console.log(`📤 Sending OD letter email with PDF attachment...`);
+    console.log(`Mail options:`, {
+      from: mailOptions.from,
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      hasHtml: !!mailOptions.html,
+      hasText: !!mailOptions.text,
+      hasAttachment: !!mailOptions.attachments,
+      attachmentSize: attachment.content ? attachment.content.length : 0,
+    });
 
-      const info = await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
+
+    if (!isResend) {
       emailConfig.currentUsage++;
       currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
-
-      console.log(`✅ OD letter email with PDF sent successfully!`);
-      console.log(`📧 Sent to: ${to}`);
-      console.log(`🆔 Message ID: ${info.messageId}`);
-      console.log(`📎 PDF attachment: ${attachment.filename} included`);
-
-      return {
-        success: true,
-        messageId: info.messageId,
-        usedEmail: emailConfig.email,
-      };
-    } catch (error) {
-      console.error("❌ Error sending OD letter email with attachment:", error);
-      lastError = error;
-      // If EAUTH or ELIMIT, try next config
-      if (error.code === "EAUTH" || error.code === "ELIMIT") {
-        currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
-        tried++;
-        if (tried < emailConfigs.length) {
-          console.log(`🔄 Retrying with next email config (index: ${currentEmailIndex})`);
-          continue;
-        }
-      }
-      // For other errors or after all configs tried, break
-      break;
     }
-  } while (tried < emailConfigs.length && currentEmailIndex !== startIndex);
-  return {
-    success: false,
-    error: lastError ? lastError.message : 'Unknown error',
-    code: lastError ? lastError.code : undefined,
-  };
+
+    console.log(`✅ OD letter email with PDF sent successfully!`);
+    console.log(`📧 Sent to: ${to}`);
+    console.log(`🆔 Message ID: ${info.messageId}`);
+    console.log(`📎 PDF attachment: ${attachment.filename} included`);
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
+    };
+  } catch (error) {
+    console.error("❌ Error sending OD letter email with attachment:", error);
+    return {
+      success: false,
+      error: error.message,
+      code: error.code,
+    };
+  }
 };
 
 module.exports = {

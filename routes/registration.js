@@ -106,10 +106,10 @@ router.post("/check-duplicate", verifyToken, async (req, res) => {
 router.post("/submit", verifyToken, async (req, res) => {
   try {
     const formData = req.body;
-    const userEmail = req.user.email;
+    const userEmail = req.user.email || formData.email;
 
-    // Validate that the user is submitting their own registration
-    if (formData.email.toLowerCase() !== userEmail.toLowerCase()) {
+    // Validate that the user is submitting their own registration (only if they have a non-anonymous email logged in)
+    if (req.user.email && formData.email.toLowerCase() !== req.user.email.toLowerCase()) {
       return res.status(403).json({
         success: false,
         error: "Forbidden",
@@ -119,7 +119,7 @@ router.post("/submit", verifyToken, async (req, res) => {
 
     // Calculate total amount based on selected events/workshops
     let totalAmount = 0;
-    const isCIT = req.user.email && req.user.email.endsWith("@citchennai.net");
+    const isCIT = userEmail && userEmail.endsWith("@citchennai.net");
 
     // Calculate cost for tech events (if no pass selected)
     if (!formData.selectedPass && formData.selectedEvents) {

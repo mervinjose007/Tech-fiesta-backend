@@ -57,11 +57,11 @@ try {
 router.post("/create-order", verifyToken, async (req, res) => {
   try {
     const { currency = "INR", receipt, notes, registrationData } = req.body;
-    const userEmail = req.user.email;
+    const userEmail = req.user.email || (registrationData && registrationData.email);
 
     // Calculate dynamic amount based on selected events/workshops
     let totalAmount = 0;
-    const isCIT = req.user.email && req.user.email.endsWith("@citchennai.net");
+    const isCIT = userEmail && userEmail.toLowerCase().endsWith("@citchennai.net");
 
     // Check if pass is selected
     if (registrationData.selectedPass) {
@@ -86,8 +86,14 @@ router.post("/create-order", verifyToken, async (req, res) => {
             passLimitsInfo.techEventsIncluded
           );
           if (additionalEvents > 0) {
-            // Each additional tech event: ₹99 regular, ₹59 CIT
-            totalAmount += additionalEvents * (isCIT ? 59 : 99);
+            // Each additional tech event: look up dynamically or fallback
+            const sampleEvent = registrationData.selectedEvents
+              .map(se => events.find(e => e.id === se.id))
+              .find(e => e && e.price);
+            const additionalCost = sampleEvent
+              ? parseInt((isCIT && sampleEvent.citPrice ? sampleEvent.citPrice : sampleEvent.price).replace("₹", ""))
+              : (isCIT ? 59 : 99);
+            totalAmount += additionalEvents * additionalCost;
           }
         }
 
@@ -107,14 +113,20 @@ router.post("/create-order", verifyToken, async (req, res) => {
     } else {
       // No pass selected - charge for individual events and workshops
 
-      // Calculate event costs
+      // Calculate event costs dynamically from events data
       if (
         registrationData.selectedEvents &&
         registrationData.selectedEvents.length > 0
       ) {
-        registrationData.selectedEvents.forEach((event) => {
-          // Tech events pricing: ₹99 regular, ₹59 CIT students
-          totalAmount += isCIT ? 59 : 99;
+        registrationData.selectedEvents.forEach((selectedEvent) => {
+          const event = events.find((e) => e.id === selectedEvent.id);
+          if (event && event.price) {
+            const priceStr = isCIT && event.citPrice ? event.citPrice : event.price;
+            totalAmount += parseInt(priceStr.replace("₹", ""));
+          } else {
+            // Fallback to original hardcoded values if event data is not found
+            totalAmount += isCIT ? 59 : 99;
+          }
         });
       }
 
@@ -379,7 +391,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
       createdAt: admin.firestore.Timestamp.now(),
       updatedAt: admin.firestore.Timestamp.now(),
       userId: req.user.uid,
-      userEmail: req.user.email,
+      userEmail: req.user.email || (registrationData && registrationData.email),
 
       // Admin tracking fields
       arrivalStatus: {
