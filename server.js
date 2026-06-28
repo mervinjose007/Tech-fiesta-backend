@@ -15,6 +15,9 @@ const allowedOrigins = [
   process.env.ADMIN_PAGE_URL || "http://localhost:3001",
   "http://localhost:3000", // Frontend fallback
   "http://localhost:3001", // Admin dashboard fallback
+  "https://techfiesta2026.vercel.app", // Production Vercel domain
+  "https://tech-fiesta-frontend.vercel.app", // Default Vercel deployment domain
+  "https://tech-fiesta-frontend-vimanthan-1s-projects.vercel.app", // Vercel preview domain
 ];
 
 app.use(

@@ -106,10 +106,10 @@ router.post("/check-duplicate", verifyToken, async (req, res) => {
 router.post("/submit", verifyToken, async (req, res) => {
   try {
     const formData = req.body;
-    const userEmail = req.user.email;
+    const userEmail = req.user.email || formData.email;
 
-    // Validate that the user is submitting their own registration
-    if (formData.email.toLowerCase() !== userEmail.toLowerCase()) {
+    // Validate that the user is submitting their own registration (only if they have a non-anonymous email logged in)
+    if (req.user.email && formData.email.toLowerCase() !== req.user.email.toLowerCase()) {
       return res.status(403).json({
         success: false,
         error: "Forbidden",
@@ -119,7 +119,7 @@ router.post("/submit", verifyToken, async (req, res) => {
 
     // Calculate total amount based on selected events/workshops
     let totalAmount = 0;
-    const isCIT = req.user.email && req.user.email.endsWith("@citchennai.net");
+    const isCIT = userEmail && userEmail.endsWith("@citchennai.net");
 
     // Calculate cost for tech events (if no pass selected)
     if (!formData.selectedPass && formData.selectedEvents) {
@@ -190,6 +190,7 @@ router.post("/submit", verifyToken, async (req, res) => {
         ...formData,
         status: "confirmed", // Directly confirmed since it's free
         paymentStatus: "not-required",
+        emailSent: false, // Added field tracking confirmation email delivery status
         createdAt: admin.firestore.Timestamp.now(),
         updatedAt: admin.firestore.Timestamp.now(),
         eventCount: (formData.selectedEvents?.length || 0) + 
@@ -263,65 +264,14 @@ router.post("/submit", verifyToken, async (req, res) => {
         }
       };
 
-      await db.collection("registrations").add(registrationData);
+      const docRef = await db.collection("registrations").add(registrationData);
 
       console.log(
         `Free registration completed: ${registrationId} for user ${userEmail}`
       );
 
-      // Send confirmation email for free registration
-      try {
-        const emailData = {
-          registrationId,
-          userEmail: req.user.email,
-          userName: formData.name,
-          userDetails: {
-            name: formData.name,
-            email: formData.email,
-            whatsapp: formData.whatsapp,
-            college: formData.college,
-            department: formData.department,
-            year: formData.year,
-          },
-          teamDetails: formData.isTeamEvent
-            ? {
-                isTeamEvent: formData.isTeamEvent,
-                teamSize: formData.teamSize,
-                teamMembers: formData.teamMembers || [],
-              }
-            : null,
-          paymentDetails: { amount: 0 }, // Free registration
-          selectedPass: formData.selectedPass,
-          selectedEvents: formData.selectedEvents || [],
-          selectedWorkshops: formData.selectedWorkshops || [],
-          selectedNonTechEvents: formData.selectedNonTechEvents || [],
-        };
-
-        console.log(
-          `📧 Sending confirmation email for free registration: ${registrationId}`
-        );
-        const emailResult = await sendRegistrationConfirmationEmail(
-          emailData,
-          events,
-          workshops
-        );
-
-        if (emailResult.success) {
-          console.log(
-            `✅ Free registration email sent successfully to ${req.user.email}`
-          );
-        } else {
-          console.error(
-            `❌ Failed to send free registration email:`,
-            emailResult.error
-          );
-        }
-      } catch (emailError) {
-        console.error(`❌ Error sending free registration email:`, emailError);
-        // Don't fail the registration if email fails
-      }
-
-      return res.json({
+      // ✅ Respond immediately — do NOT wait for email
+      res.json({
         success: true,
         data: {
           registrationId,
@@ -329,6 +279,67 @@ router.post("/submit", verifyToken, async (req, res) => {
           eventCount: registrationData.eventCount,
         },
         message: "Registration completed successfully",
+      });
+
+      // 📧 Send confirmation email in background (fire-and-forget)
+      setImmediate(async () => {
+        try {
+          const emailData = {
+            registrationId,
+            userEmail: req.user.email,
+            userName: formData.name,
+            userDetails: {
+              name: formData.name,
+              email: formData.email,
+              whatsapp: formData.whatsapp,
+              college: formData.college,
+              department: formData.department,
+              year: formData.year,
+            },
+            teamDetails: formData.isTeamEvent
+              ? {
+                  isTeamEvent: formData.isTeamEvent,
+                  teamSize: formData.teamSize,
+                  teamMembers: formData.teamMembers || [],
+                }
+              : null,
+            paymentDetails: { amount: 0 }, // Free registration
+            selectedPass: formData.selectedPass,
+            selectedEvents: formData.selectedEvents || [],
+            selectedWorkshops: formData.selectedWorkshops || [],
+            selectedNonTechEvents: formData.selectedNonTechEvents || [],
+          };
+
+          console.log(
+            `📧 Sending confirmation email for free registration: ${registrationId}`
+          );
+          const emailResult = await sendRegistrationConfirmationEmail(
+            emailData,
+            events,
+            workshops
+          );
+
+          if (emailResult.success) {
+            console.log(
+              `✅ Free registration email sent successfully to ${formData.email}`
+            );
+            await docRef.update({
+              emailSent: true,
+              emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+          } else {
+            console.error(
+              `❌ Failed to send free registration email:`,
+              emailResult.error
+            );
+            await docRef.update({
+              emailSent: false,
+              emailSendError: emailResult.error?.message || String(emailResult.error)
+            });
+          }
+        } catch (emailError) {
+          console.error(`❌ Error sending free registration email (background):`, emailError);
+        }
       });
     } else {
       // For paid registrations - redirect to payment processing

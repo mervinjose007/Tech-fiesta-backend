@@ -57,11 +57,11 @@ try {
 router.post("/create-order", verifyToken, async (req, res) => {
   try {
     const { currency = "INR", receipt, notes, registrationData } = req.body;
-    const userEmail = req.user.email;
+    const userEmail = req.user.email || (registrationData && registrationData.email);
 
     // Calculate dynamic amount based on selected events/workshops
     let totalAmount = 0;
-    const isCIT = req.user.email && req.user.email.endsWith("@citchennai.net");
+    const isCIT = userEmail && userEmail.toLowerCase().endsWith("@citchennai.net");
 
     // Check if pass is selected
     if (registrationData.selectedPass) {
@@ -86,8 +86,14 @@ router.post("/create-order", verifyToken, async (req, res) => {
             passLimitsInfo.techEventsIncluded
           );
           if (additionalEvents > 0) {
-            // Each additional tech event: ₹99 regular, ₹59 CIT
-            totalAmount += additionalEvents * (isCIT ? 59 : 99);
+            // Each additional tech event: look up dynamically or fallback
+            const sampleEvent = registrationData.selectedEvents
+              .map(se => events.find(e => e.id === se.id))
+              .find(e => e && e.price);
+            const additionalCost = sampleEvent
+              ? parseInt((isCIT && sampleEvent.citPrice ? sampleEvent.citPrice : sampleEvent.price).replace("₹", ""))
+              : (isCIT ? 59 : 99);
+            totalAmount += additionalEvents * additionalCost;
           }
         }
 
@@ -107,14 +113,20 @@ router.post("/create-order", verifyToken, async (req, res) => {
     } else {
       // No pass selected - charge for individual events and workshops
 
-      // Calculate event costs
+      // Calculate event costs dynamically from events data
       if (
         registrationData.selectedEvents &&
         registrationData.selectedEvents.length > 0
       ) {
-        registrationData.selectedEvents.forEach((event) => {
-          // Tech events pricing: ₹99 regular, ₹59 CIT students
-          totalAmount += isCIT ? 59 : 99;
+        registrationData.selectedEvents.forEach((selectedEvent) => {
+          const event = events.find((e) => e.id === selectedEvent.id);
+          if (event && event.price) {
+            const priceStr = isCIT && event.citPrice ? event.citPrice : event.price;
+            totalAmount += parseInt(priceStr.replace("₹", ""));
+          } else {
+            // Fallback to original hardcoded values if event data is not found
+            totalAmount += isCIT ? 59 : 99;
+          }
         });
       }
 
@@ -376,10 +388,11 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
       },
       status: "confirmed",
       paymentStatus: "verified",
+      emailSent: false, // Added field tracking confirmation email delivery status
       createdAt: admin.firestore.Timestamp.now(),
       updatedAt: admin.firestore.Timestamp.now(),
       userId: req.user.uid,
-      userEmail: req.user.email,
+      userEmail: req.user.email || (registrationData && registrationData.email),
 
       // Admin tracking fields
       arrivalStatus: {
@@ -467,29 +480,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
 
     console.log("Payment verified and registration completed:", registrationId);
 
-    // Send confirmation email
-    try {
-      const emailResult = await sendRegistrationConfirmationEmail(
-        finalRegistrationData,
-        events,
-        workshops
-      );
-
-      if (emailResult.success) {
-        console.log(
-          `Confirmation email sent successfully to ${req.user.email} using ${emailResult.usedEmail}`
-        );
-      } else {
-        console.error(
-          `Failed to send confirmation email: ${emailResult.error}`
-        );
-        // Don't fail the registration if email fails
-      }
-    } catch (emailError) {
-      console.error("Error sending confirmation email:", emailError);
-      // Continue with successful response even if email fails
-    }
-
+    // ✅ Respond immediately — do NOT wait for email to send
     res.json({
       success: true,
       data: {
@@ -500,6 +491,39 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
       },
       message: "Payment verified and registration completed successfully",
     });
+
+    // 📧 Send confirmation email in background (fire-and-forget)
+    // This runs AFTER the response is already sent — no blocking
+    setImmediate(async () => {
+      try {
+        const emailResult = await sendRegistrationConfirmationEmail(
+          finalRegistrationData,
+          events,
+          workshops
+        );
+
+        if (emailResult.success) {
+          console.log(
+            `Confirmation email sent successfully to ${finalRegistrationData.email} using ${emailResult.usedEmail}`
+          );
+          await registrationRef.update({
+            emailSent: true,
+            emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        } else {
+          console.error(
+            `Failed to send confirmation email: ${emailResult.error}`
+          );
+          await registrationRef.update({
+            emailSent: false,
+            emailSendError: emailResult.error?.message || String(emailResult.error)
+          });
+        }
+      } catch (emailError) {
+        console.error("Error sending confirmation email (background):", emailError);
+      }
+    });
+
   } catch (error) {
     console.error("Error verifying payment:", error);
     res.status(500).json({
@@ -509,6 +533,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
     });
   }
 });
+
 
 // Get payment status endpoint - simplified for UPI payments
 router.get("/status/:orderId", verifyToken, async (req, res) => {
@@ -806,6 +831,23 @@ router.post("/send-manual-email", verifyToken, async (req, res) => {
       console.log(
         `✅ Manual email sent successfully to ${registrationData.userEmail}`
       );
+
+      // Update Firestore document to set emailSent: true
+      try {
+        const db = admin.firestore();
+        const registrationsRef = db.collection("registrations");
+        const query = registrationsRef.where("registrationId", "==", registrationData.registrationId);
+        const snapshot = await query.get();
+        if (!snapshot.empty) {
+          await snapshot.docs[0].ref.update({
+            emailSent: true,
+            emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      } catch (dbError) {
+        console.error("Error updating emailSent status in Firestore:", dbError);
+      }
+
       res.json({
         success: true,
         messageId: result.messageId,
