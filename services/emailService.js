@@ -1,5 +1,7 @@
 const nodemailer = require("nodemailer");
 
+
+
 // Email configuration with rotation
 const emailConfigs = [
   {
@@ -55,14 +57,14 @@ setInterval(resetUsageCounters, 24 * 60 * 60 * 1000);
 
 // Get email service status
 const getEmailServiceStatus = () => {
-  if (process.env.RESEND_API_KEY) {
+  if (process.env.BREVO_API_KEY) {
     return [
       {
-        type: "Resend",
-        email: "onboarding@resend.dev",
+        type: "Brevo",
+        email: process.env.BREVO_SENDER_EMAIL || "Not configured",
         isConfigured: true,
         currentUsage: "N/A",
-        dailyLimit: "Unlimited (free tier limits apply)",
+        dailyLimit: "300 emails/day",
         isActive: true,
       }
     ];
@@ -536,26 +538,87 @@ const sendRegistrationConfirmationEmail = async (
   );
 
   try {
-    const isResend = !!process.env.RESEND_API_KEY;
-    let emailConfig = null;
-    let transporter = null;
-
-    if (isResend) {
-      transporter = createTransporter();
-    } else {
-      emailConfig = getAvailableEmailConfig();
-      if (!emailConfig.email || !emailConfig.password) {
-        console.error("❌ No email configuration available");
-        return { success: false, error: "Email service not configured" };
-      }
-      console.log(
-        `🔧 Using Gmail config for sending: ${emailConfig.email.replace(
-          /(.{3}).*(@.*)/,
-          "$1***$2"
-        )}`
+    if (process.env.BREVO_API_KEY) {
+      console.log(`📝 Generating email template...`);
+      logEmailTemplateInfo(registrationData, events, workshops);
+      const htmlContent = generateRegistrationEmailTemplate(
+        registrationData,
+        events,
+        workshops
       );
-      transporter = createTransporter(emailConfig);
+      console.log(
+        `✅ Email template generated successfully (${htmlContent.length} characters)`
+      );
+
+      const senderEmail = process.env.BREVO_SENDER_EMAIL || "vimanexample@gmail.com";
+      const senderName = process.env.BREVO_SENDER_NAME || "Tech Fiesta Team";
+      console.log(`📤 Sending email via Brevo HTTP API...`);
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        body: JSON.stringify({
+          sender: {
+            name: senderName,
+            email: senderEmail
+          },
+          to: [
+            {
+              email: registrationData.userEmail
+            }
+          ],
+          subject: `🎉 Tech Fiesta 2025 - Registration Confirmed (${registrationData.registrationId})`,
+          htmlContent: htmlContent,
+          textContent: `
+Tech Fiesta 2025 - Registration Confirmed
+
+Registration ID: ${registrationData.registrationId}
+Email: ${registrationData.userEmail}
+Amount Paid: ₹${registrationData.paymentDetails?.amount || 0}
+Payment ID: ${
+            registrationData.paymentDetails?.paymentId || "N/A (Free Registration)"
+          }
+
+Your registration has been confirmed successfully!
+Please save this email for your records and bring it to events for verification.
+
+For queries, contact: Asymmetric@citchennai.net
+          `
+        })
+      });
+
+      const resultJson = await response.json();
+
+      if (!response.ok) {
+        console.error("❌ Brevo API Error:", resultJson);
+        return { success: false, error: resultJson.message || "Failed to send email via Brevo" };
+      }
+
+      console.log(`✅ Registration email sent successfully! Message ID: ${resultJson.messageId}`);
+      return {
+        success: true,
+        messageId: resultJson.messageId,
+        usedEmail: "Brevo HTTP API",
+      };
     }
+
+    // Gmail SMTP Fallback
+    const emailConfig = getAvailableEmailConfig();
+    if (!emailConfig.email || !emailConfig.password) {
+      console.error("❌ No email configuration available");
+      return { success: false, error: "Email service not configured" };
+    }
+    console.log(
+      `🔧 Using Gmail config for sending: ${emailConfig.email.replace(
+        /(.{3}).*(@.*)/,
+        "$1***$2"
+      )}`
+    );
+    const transporter = createTransporter(emailConfig);
 
     console.log(`📝 Generating email template...`);
     logEmailTemplateInfo(registrationData, events, workshops);
@@ -568,9 +631,7 @@ const sendRegistrationConfirmationEmail = async (
       `✅ Email template generated successfully (${htmlContent.length} characters)`
     );
 
-    const fromAddress = isResend
-      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
-      : `"${emailConfig.name}" <${emailConfig.email}>`;
+    const fromAddress = `"${emailConfig.name}" <${emailConfig.email}>`;
 
     const mailOptions = {
       from: fromAddress,
@@ -594,49 +655,34 @@ For queries, contact: Asymmetric@citchennai.net
       `,
     };
 
-    console.log(`📤 Sending email...`);
-    console.log(`Mail options:`, {
-      from: mailOptions.from,
-      to: mailOptions.to,
-      subject: mailOptions.subject,
-      hasHtml: !!mailOptions.html,
-      hasText: !!mailOptions.text,
-    });
-
+    console.log(`📤 Sending email via SMTP...`);
     const info = await transporter.sendMail(mailOptions);
 
-    if (!isResend) {
-      // Increment usage counter
-      emailConfig.currentUsage++;
-      // Move to next email for the next send
-      currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
-      console.log(`📊 Email usage stats:`, {
-        usedEmail: emailConfig.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
-        currentUsage: emailConfig.currentUsage,
-        dailyLimit: emailConfig.dailyLimit,
-        nextEmailIndex: currentEmailIndex,
-      });
-    }
+    // Increment usage counter
+    emailConfig.currentUsage++;
+    // Move to next email for the next send
+    currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
+    console.log(`📊 Email usage stats:`, {
+      usedEmail: emailConfig.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
+      currentUsage: emailConfig.currentUsage,
+      dailyLimit: emailConfig.dailyLimit,
+      nextEmailIndex: currentEmailIndex,
+    });
 
-    console.log(`✅ Registration email sent successfully!`);
+    console.log(`✅ Registration email sent successfully via SMTP!`);
     console.log(`📧 Sent to: ${registrationData.userEmail}`);
     console.log(`🆔 Message ID: ${info.messageId}`);
 
     return {
       success: true,
       messageId: info.messageId,
-      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
+      usedEmail: emailConfig.email,
     };
   } catch (error) {
     console.error("❌ Error sending registration email:", error);
-    console.error("Error details:", {
-      code: error.code,
-      message: error.message,
-      stack: error.stack,
-    });
 
-    // If current email failed, try the next one
-    if (error.code === "EAUTH" || error.code === "ELIMIT") {
+    // If current email failed, try the next one (only applicable to SMTP Gmail rotation)
+    if (!process.env.BREVO_API_KEY && (error.code === "EAUTH" || error.code === "ELIMIT")) {
       console.log("🔄 Trying next email configuration...");
       currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
 
@@ -668,30 +714,64 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
   console.log(`📝 Subject: ${subject}`);
 
   try {
-    const isResend = !!process.env.RESEND_API_KEY;
-    let emailConfig = null;
-    let transporter = null;
+    if (process.env.BREVO_API_KEY) {
+      const senderEmail = process.env.BREVO_SENDER_EMAIL || "vimanexample@gmail.com";
+      const senderName = process.env.BREVO_SENDER_NAME || "Tech Fiesta Team";
+      console.log(`📤 Sending notification email via Brevo HTTP API...`);
+      
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        body: JSON.stringify({
+          sender: {
+            name: senderName,
+            email: senderEmail
+          },
+          to: [
+            {
+              email: to
+            }
+          ],
+          subject: subject,
+          htmlContent: htmlContent,
+          textContent: textContent || htmlContent.replace(/<[^>]*>/g, "")
+        })
+      });
 
-    if (isResend) {
-      transporter = createTransporter();
-    } else {
-      emailConfig = getAvailableEmailConfig();
-      if (!emailConfig.email || !emailConfig.password) {
-        console.error("❌ No email configuration available");
-        return { success: false, error: "Email service not configured" };
+      const resultJson = await response.json();
+
+      if (!response.ok) {
+        console.error("❌ Brevo API Error:", resultJson);
+        return { success: false, error: resultJson.message || "Failed to send email via Brevo" };
       }
-      console.log(
-        `🔧 Using Gmail config for notification: ${emailConfig.email.replace(
-          /(.{3}).*(@.*)/,
-          "$1***$2"
-        )}`
-      );
-      transporter = createTransporter(emailConfig);
+
+      console.log(`✅ Notification email sent successfully! Message ID: ${resultJson.messageId}`);
+      return {
+        success: true,
+        messageId: resultJson.messageId,
+        usedEmail: "Brevo HTTP API",
+      };
     }
 
-    const fromAddress = isResend
-      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
-      : `"${emailConfig.name}" <${emailConfig.email}>`;
+    // Gmail SMTP Fallback
+    const emailConfig = getAvailableEmailConfig();
+    if (!emailConfig.email || !emailConfig.password) {
+      console.error("❌ No email configuration available");
+      return { success: false, error: "Email service not configured" };
+    }
+    console.log(
+      `🔧 Using Gmail config for notification: ${emailConfig.email.replace(
+        /(.{3}).*(@.*)/,
+        "$1***$2"
+      )}`
+    );
+    const transporter = createTransporter(emailConfig);
+
+    const fromAddress = `"${emailConfig.name}" <${emailConfig.email}>`;
 
     const mailOptions = {
       from: fromAddress,
@@ -701,30 +781,17 @@ const sendNotificationEmail = async (to, subject, htmlContent, textContent) => {
       text: textContent,
     };
 
-    console.log(`📤 Sending notification email...`);
-    console.log(`Mail options:`, {
-      from: mailOptions.from,
-      to: mailOptions.to,
-      subject: mailOptions.subject,
-      hasHtml: !!mailOptions.html,
-      hasText: !!mailOptions.text,
-    });
-
+    console.log(`📤 Sending notification email via SMTP...`);
     const info = await transporter.sendMail(mailOptions);
 
-    if (!isResend) {
-      emailConfig.currentUsage++;
-      currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
-    }
+    emailConfig.currentUsage++;
+    currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
 
-    console.log(`✅ Notification email sent successfully!`);
-    console.log(`📧 Sent to: ${to}`);
-    console.log(`🆔 Message ID: ${info.messageId}`);
-
+    console.log(`✅ Notification email sent successfully via SMTP!`);
     return {
       success: true,
       messageId: info.messageId,
-      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
+      usedEmail: emailConfig.email,
     };
   } catch (error) {
     console.error("❌ Error sending notification email:", error);
@@ -741,66 +808,71 @@ const testEmailConnectivity = async () => {
   console.log(`🧪 Testing email connectivity...`);
   const results = [];
 
-  if (process.env.RESEND_API_KEY) {
-    console.log(`🔍 Testing Resend SMTP configuration`);
+  if (process.env.BREVO_API_KEY) {
+    console.log(`🔍 Testing Brevo HTTP API key configuration`);
     try {
-      const transporter = createTransporter();
-      await transporter.verify();
-      console.log(`✅ Resend SMTP: Connection successful`);
+      const response = await fetch("https://api.brevo.com/v3/account", {
+        method: "GET",
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "accept": "application/json"
+        }
+      });
+      const resultJson = await response.json();
+      if (!response.ok) {
+        throw new Error(resultJson.message || "Failed to fetch account info");
+      }
+      console.log(`✅ Brevo HTTP API: Connection/Key is valid`);
       results.push({
-        type: "resend",
+        type: "brevo",
         status: "success",
-        message: "Connection verified with Resend SMTP",
+        message: `API Key verified. Account Email: ${resultJson.email}`,
       });
     } catch (error) {
-      console.error(`❌ Resend SMTP: Connection failed -`, error.message);
+      console.error(`❌ Brevo HTTP API: Verification failed -`, error.message);
       results.push({
-        type: "resend",
+        type: "brevo",
         status: "failed",
         error: error.message,
-        code: error.code,
       });
     }
-    console.log(`🏁 Email connectivity test completed`);
-    console.table(results);
-    return results;
-  }
+  } else {
+    console.log(`🧪 Testing email connectivity for all Gmail configurations...`);
+    for (let i = 0; i < emailConfigs.length; i++) {
+      const config = emailConfigs[i];
+      if (!config.email || !config.password) {
+        continue;
+      }
+      console.log(
+        `🔍 Testing email ${i + 1}: ${config.email.replace(
+          /(.{3}).*(@.*)/,
+          "$1***$2"
+        )}`
+      );
 
-  console.log(`🧪 Testing email connectivity for all Gmail configurations...`);
-  for (let i = 0; i < emailConfigs.length; i++) {
-    const config = emailConfigs[i];
-    if (!config.email || !config.password) {
-      continue;
-    }
-    console.log(
-      `🔍 Testing email ${i + 1}: ${config.email.replace(
-        /(.{3}).*(@.*)/,
-        "$1***$2"
-      )}`
-    );
+      try {
+        const transporter = createTransporter(config);
 
-    try {
-      const transporter = createTransporter(config);
+        // Verify the connection
+        await transporter.verify();
 
-      // Verify the connection
-      await transporter.verify();
-
-      console.log(`✅ Email ${i + 1}: Connection successful`);
-      results.push({
-        index: i + 1,
-        email: config.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
-        status: "success",
-        message: "Connection verified",
-      });
-    } catch (error) {
-      console.error(`❌ Email ${i + 1}: Connection failed -`, error.message);
-      results.push({
-        index: i + 1,
-        email: config.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
-        status: "failed",
-        error: error.message,
-        code: error.code,
-      });
+        console.log(`✅ Email ${i + 1}: Connection successful`);
+        results.push({
+          index: i + 1,
+          email: config.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
+          status: "success",
+          message: "Connection verified",
+        });
+      } catch (error) {
+        console.error(`❌ Email ${i + 1}: Connection failed -`, error.message);
+        results.push({
+          index: i + 1,
+          email: config.email.replace(/(.{3}).*(@.*)/, "$1***$2"),
+          status: "failed",
+          error: error.message,
+          code: error.code,
+        });
+      }
     }
   }
 
@@ -891,30 +963,57 @@ const sendODLetterWithAttachment = async (to, subject, htmlContent, textContent,
   console.log(`📎 Attachment: ${attachment.filename}`);
 
   try {
-    const isResend = !!process.env.RESEND_API_KEY;
-    let emailConfig = null;
-    let transporter = null;
+    if (resend) {
+      const fromAddress = process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>";
+      console.log(`📤 Sending OD letter email with PDF attachment via Resend HTTP API...`);
 
-    if (isResend) {
-      transporter = createTransporter();
-    } else {
-      emailConfig = getAvailableEmailConfig();
-      if (!emailConfig.email || !emailConfig.password) {
-        console.error("❌ No email configuration available");
-        return { success: false, error: "Email service not configured" };
+      // Normalize attachment content to Buffer for Resend
+      const attachmentContent = Buffer.isBuffer(attachment.content)
+        ? attachment.content
+        : Buffer.from(attachment.content);
+
+      const { data, error } = await resend.emails.send({
+        from: fromAddress,
+        to: to,
+        subject: subject,
+        html: htmlContent,
+        text: textContent,
+        attachments: [
+          {
+            filename: attachment.filename,
+            content: attachmentContent,
+          },
+        ],
+      });
+
+      if (error) {
+        console.error("❌ Resend API Error:", error);
+        return { success: false, error: error.message || String(error) };
       }
-      console.log(
-        `🔧 Using Gmail config for OD: ${emailConfig.email.replace(
-          /(.{3}).*(@.*)/,
-          "$1***$2"
-        )}`
-      );
-      transporter = createTransporter(emailConfig);
+
+      console.log(`✅ OD letter email with PDF sent successfully! Message ID: ${data.id}`);
+      return {
+        success: true,
+        messageId: data.id,
+        usedEmail: "Resend HTTP API",
+      };
     }
 
-    const fromAddress = isResend
-      ? (process.env.EMAIL_FROM || "Tech Fiesta Team <onboarding@resend.dev>")
-      : `"${emailConfig.name}" <${emailConfig.email}>`;
+    // Gmail SMTP Fallback
+    const emailConfig = getAvailableEmailConfig();
+    if (!emailConfig.email || !emailConfig.password) {
+      console.error("❌ No email configuration available");
+      return { success: false, error: "Email service not configured" };
+    }
+    console.log(
+      `🔧 Using Gmail config for OD: ${emailConfig.email.replace(
+        /(.{3}).*(@.*)/,
+        "$1***$2"
+      )}`
+    );
+    const transporter = createTransporter(emailConfig);
+
+    const fromAddress = `"${emailConfig.name}" <${emailConfig.email}>`;
 
     const mailOptions = {
       from: fromAddress,
@@ -932,22 +1031,10 @@ const sendODLetterWithAttachment = async (to, subject, htmlContent, textContent,
     };
 
     console.log(`📤 Sending OD letter email with PDF attachment...`);
-    console.log(`Mail options:`, {
-      from: mailOptions.from,
-      to: mailOptions.to,
-      subject: mailOptions.subject,
-      hasHtml: !!mailOptions.html,
-      hasText: !!mailOptions.text,
-      hasAttachment: !!mailOptions.attachments,
-      attachmentSize: attachment.content ? attachment.content.length : 0,
-    });
-
     const info = await transporter.sendMail(mailOptions);
 
-    if (!isResend) {
-      emailConfig.currentUsage++;
-      currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
-    }
+    emailConfig.currentUsage++;
+    currentEmailIndex = (currentEmailIndex + 1) % emailConfigs.length;
 
     console.log(`✅ OD letter email with PDF sent successfully!`);
     console.log(`📧 Sent to: ${to}`);
@@ -957,7 +1044,7 @@ const sendODLetterWithAttachment = async (to, subject, htmlContent, textContent,
     return {
       success: true,
       messageId: info.messageId,
-      usedEmail: isResend ? "Resend SMTP" : emailConfig.email,
+      usedEmail: emailConfig.email,
     };
   } catch (error) {
     console.error("❌ Error sending OD letter email with attachment:", error);

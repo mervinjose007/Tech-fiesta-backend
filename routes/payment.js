@@ -388,6 +388,7 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
       },
       status: "confirmed",
       paymentStatus: "verified",
+      emailSent: false, // Added field tracking confirmation email delivery status
       createdAt: admin.firestore.Timestamp.now(),
       updatedAt: admin.firestore.Timestamp.now(),
       userId: req.user.uid,
@@ -505,10 +506,18 @@ router.post("/verify-payment", verifyToken, async (req, res) => {
           console.log(
             `Confirmation email sent successfully to ${finalRegistrationData.email} using ${emailResult.usedEmail}`
           );
+          await registrationRef.update({
+            emailSent: true,
+            emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
         } else {
           console.error(
             `Failed to send confirmation email: ${emailResult.error}`
           );
+          await registrationRef.update({
+            emailSent: false,
+            emailSendError: emailResult.error?.message || String(emailResult.error)
+          });
         }
       } catch (emailError) {
         console.error("Error sending confirmation email (background):", emailError);
@@ -822,6 +831,23 @@ router.post("/send-manual-email", verifyToken, async (req, res) => {
       console.log(
         `✅ Manual email sent successfully to ${registrationData.userEmail}`
       );
+
+      // Update Firestore document to set emailSent: true
+      try {
+        const db = admin.firestore();
+        const registrationsRef = db.collection("registrations");
+        const query = registrationsRef.where("registrationId", "==", registrationData.registrationId);
+        const snapshot = await query.get();
+        if (!snapshot.empty) {
+          await snapshot.docs[0].ref.update({
+            emailSent: true,
+            emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      } catch (dbError) {
+        console.error("Error updating emailSent status in Firestore:", dbError);
+      }
+
       res.json({
         success: true,
         messageId: result.messageId,

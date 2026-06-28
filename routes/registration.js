@@ -190,6 +190,7 @@ router.post("/submit", verifyToken, async (req, res) => {
         ...formData,
         status: "confirmed", // Directly confirmed since it's free
         paymentStatus: "not-required",
+        emailSent: false, // Added field tracking confirmation email delivery status
         createdAt: admin.firestore.Timestamp.now(),
         updatedAt: admin.firestore.Timestamp.now(),
         eventCount: (formData.selectedEvents?.length || 0) + 
@@ -263,7 +264,7 @@ router.post("/submit", verifyToken, async (req, res) => {
         }
       };
 
-      await db.collection("registrations").add(registrationData);
+      const docRef = await db.collection("registrations").add(registrationData);
 
       console.log(
         `Free registration completed: ${registrationId} for user ${userEmail}`
@@ -322,11 +323,19 @@ router.post("/submit", verifyToken, async (req, res) => {
             console.log(
               `✅ Free registration email sent successfully to ${formData.email}`
             );
+            await docRef.update({
+              emailSent: true,
+              emailSentAt: admin.firestore.FieldValue.serverTimestamp()
+            });
           } else {
             console.error(
               `❌ Failed to send free registration email:`,
               emailResult.error
             );
+            await docRef.update({
+              emailSent: false,
+              emailSendError: emailResult.error?.message || String(emailResult.error)
+            });
           }
         } catch (emailError) {
           console.error(`❌ Error sending free registration email (background):`, emailError);
